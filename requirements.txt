@@ -1,0 +1,14 @@
+google-genai
+google-api-core
+firecrawl-py
+pydantic>=2.0.0
+pydantic-settings
+fastapi
+uvicorn
+typer
+langfuse
+python-dotenv
+pytest
+pytest-asyncio
+httpx
+loguru

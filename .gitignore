@@ -1,0 +1,79 @@
+# Environment and Secrets
+.env
+.env.local
+.env.*
+!.env.example
+*.pem
+*.key
+
+# SQLite Databases & Storage
+*.db
+*.db-journal
+*.sqlite
+*.sqlite3
+research_jobs.db
+legacy_test.db
+repeat_test.db
+
+# Python & Virtual Environments
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+.venv/
+venv/
+ENV/
+env/
+
+# Logs & Traces
+logs/
+*.log
+
+# Testing & Coverage
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.nox/
+.hypothesis/
+.ruff_cache/
+
+# IDEs & Editors
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.project
+.pydevproject
+
+# Operating System
+.DS_Store
+Thumbs.db
+
+# Output & Temp Files
+tmp/
+temp/
+*.tmp
+
+.claude/
+*.pdf
+.pytest_cache/
