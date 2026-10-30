@@ -1,616 +1,822 @@
-import streamlit as st
-import requests
+import os
 import time
-import json
+from html import escape
 from datetime import datetime
+from typing import Any, Optional
 
-# --- CONFIGURATION ---
-BACKEND_URL = "http://localhost:8000"
-ACCENT_COLOR = "#FF5733"  # Premium Coral
-BG_COLOR = "#FAF9F6"      # Warm Off-White
-TEXT_COLOR = "#FFFFFF"    # Near Black
+import requests
+import streamlit as st
 
-st.set_page_config(
-    page_title="Nexus AI | Research Anything",
-    page_icon="⚡",
-    layout="wide",
-    initial_sidebar_state="collapsed"
+
+BACKEND_URL = os.getenv("NEXUS_API_URL", "http://localhost:8000").rstrip("/")
+POLL_INTERVAL_SECONDS = 3
+REQUEST_TIMEOUT_SECONDS = 10
+NAV_ITEMS = ("Dashboard", "New Research", "Research History", "Saved Reports", "Settings")
+RESEARCH_STAGES = (
+    ("created", "Request received"),
+    ("planning", "Research planning"),
+    ("searching", "Web search"),
+    ("retrieving", "Content retrieval"),
+    ("filtering", "Source filtering"),
+    ("synthesizing", "AI synthesis"),
+    ("done", "Research complete"),
 )
 
-# --- PREMIUM CSS INJECTION ---
-st.markdown(f"""
-<style>
-    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono&display=swap');
+st.set_page_config(
+    page_title="Nexus AI — Research Workspace",
+    page_icon="N",
+    layout="wide",
+    initial_sidebar_state="expanded",
+)
 
-    /* Global Styles */
-    .stApp {{
-        background-color: {BG_COLOR};
-        background-image: radial-gradient(#e5e7eb 1px, transparent 1px);
-        background-size: 24px 24px;
-        color: {TEXT_COLOR};
-        font-family: 'Inter', sans-serif;
-    }}
 
-    /* Hide Default Streamlit Elements */
-    #MainMenu, footer, header {{visibility: hidden;}}
-    .stDeployButton {{display:none;}}
+def inject_styles() -> None:
+    st.markdown(
+        """
+        <style>
+        @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@400;500;600;700;800&display=swap');
+        :root {
+            --bg: #0c0e12;
+            --surface: #12151b;
+            --surface-raised: #171b23;
+            --border: #252a34;
+            --muted: #939baa;
+            --text: #edf0f5;
+            --accent: #b7f36b;
+            --accent-strong: #a4e457;
+        }
+        html, body, [class*="css"], [data-testid="stAppViewContainer"] {
+            font-family: 'DM Sans', sans-serif;
+        }
+        .stApp { background: var(--bg); color: var(--text); }
+        [data-testid="stHeader"] { background: rgba(12, 14, 18, .8); }
+        [data-testid="stSidebar"] {
+            background: #101218;
+            border-right: 1px solid var(--border);
+        }
+        [data-testid="stSidebar"] > div:first-child { padding-top: 1.2rem; }
+        [data-testid="stMain"] .block-container {
+            max-width: 1240px;
+            padding: 2.4rem 2.5rem 4rem;
+        }
+        h1, h2, h3 { font-family: 'Manrope', sans-serif !important; letter-spacing: -.035em; }
+        h1 { font-size: clamp(1.8rem, 3vw, 2.6rem) !important; font-weight: 700 !important; }
+        h2 { font-size: 1.45rem !important; font-weight: 700 !important; }
+        h3 { font-size: 1.05rem !important; font-weight: 650 !important; }
+        p, label, [data-testid="stCaptionContainer"] { color: #b5bdca; }
+        [data-testid="stSidebar"] [data-testid="stMarkdownContainer"] p { color: var(--muted); }
+        [data-testid="stSidebar"] .stButton > button {
+            background: #191e27 !important;
+            border: 1px solid #303846 !important;
+            color: #edf0f5 !important;
+            text-align: left;
+            justify-content: flex-start;
+            padding: .62rem .8rem;
+            min-height: 2.55rem;
+            transition: background .16s ease, border-color .16s ease, color .16s ease;
+        }
+        [data-testid="stSidebar"] .stButton > button:hover {
+            background: #252c37 !important;
+            border-color: #566174 !important;
+            color: #ffffff !important;
+        }
+        [data-testid="stSidebar"] .stButton > button[kind="primary"] {
+            background: #b7f36b !important;
+            border-color: #b7f36b !important;
+            color: #10140c !important;
+        }
+        .stButton > button, .stDownloadButton > button, .stLinkButton > a {
+            background-color: #202631 !important;
+            border: 1px solid #3b4554 !important;
+            color: #f3f5f8 !important;
+            border-radius: 9px;
+            font-weight: 600;
+            transition: transform .16s ease, border-color .16s ease, background .16s ease;
+        }
+        .stButton > button p, .stDownloadButton > button p,
+        .stLinkButton > a p, .stFormSubmitButton > button p,
+        [data-testid="stSidebar"] .stButton > button p {
+            color: inherit !important;
+        }
+        .stButton > button:hover, .stDownloadButton > button:hover, .stLinkButton > a:hover {
+            background-color: #2b3441 !important;
+            border-color: #667387 !important;
+            color: #ffffff !important;
+            transform: translateY(-1px);
+        }
+        .stButton > button[kind="primary"], .stFormSubmitButton > button {
+            background: #b7f36b !important;
+            border-color: #b7f36b !important;
+            color: #10140c !important;
+        }
+        .stButton > button[kind="primary"]:hover, .stFormSubmitButton > button:hover {
+            background: #c8fa8a !important;
+            border-color: #c8fa8a !important;
+            color: #10140c !important;
+        }
+        [data-testid="stTextArea"] textarea, [data-testid="stTextInput"] input {
+            background: #101319;
+            border-color: #2a303b;
+            border-radius: 10px;
+            color: var(--text);
+        }
+        [data-testid="stTextArea"] textarea:focus, [data-testid="stTextInput"] input:focus {
+            border-color: #819e5c;
+            box-shadow: 0 0 0 1px #819e5c;
+        }
+        [data-testid="stMetric"] {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 1rem 1.1rem;
+        }
+        [data-testid="stMetricLabel"] { color: var(--muted); }
+        [data-testid="stMetricValue"] { color: var(--text); font-family: 'Manrope', sans-serif; }
+        [data-testid="stExpander"] {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 10px;
+        }
+        .brand {
+            display: flex; align-items: center; gap: .7rem;
+            color: var(--text); font: 700 1.15rem 'Manrope', sans-serif;
+            letter-spacing: -.04em; padding: 0 .4rem .8rem;
+        }
+        .brand-mark {
+            display: grid; place-items: center; width: 31px; height: 31px;
+            border-radius: 9px; background: var(--accent); color: #10140c;
+            font-size: .82rem; font-weight: 800;
+        }
+        .eyebrow {
+            color: var(--accent); text-transform: uppercase; letter-spacing: .12em;
+            font-size: .72rem; font-weight: 700; margin-bottom: .5rem;
+        }
+        .hero-panel {
+            background: radial-gradient(ellipse at 86% 0%, rgba(183,243,107,.09), transparent 38%), #12151b;
+            border: 1px solid var(--border); border-radius: 16px;
+            padding: clamp(1.3rem, 3vw, 2.2rem); margin: .4rem 0 1.5rem;
+        }
+        .hero-panel h1 { margin: .1rem 0 .5rem; }
+        .hero-copy { color: #aeb6c4; max-width: 680px; line-height: 1.65; }
+        .section-head {
+            display: flex; align-items: center; justify-content: space-between;
+            margin: 1.8rem 0 .8rem;
+        }
+        .section-head h3 { margin: 0; }
+        .surface-card {
+            background: var(--surface); border: 1px solid var(--border);
+            border-radius: 12px; padding: 1.05rem 1.15rem; margin-bottom: .7rem;
+        }
+        .subtle { color: var(--muted); font-size: .88rem; }
+        .status-pill {
+            display: inline-flex; align-items: center; gap: .45rem;
+            border: 1px solid var(--border); background: #171b22;
+            color: #cbd2dd; border-radius: 999px; padding: .26rem .65rem;
+            font-size: .76rem; font-weight: 600;
+        }
+        .status-dot {
+            width: 7px; height: 7px; border-radius: 50%; display: inline-block;
+            background: #8992a1;
+        }
+        .status-dot.ok { background: var(--accent); }
+        .status-dot.warn { background: #f0b65a; }
+        .status-dot.bad { background: #f07878; }
+        .stage-item {
+            display: flex; gap: .8rem; align-items: flex-start;
+            padding: .7rem .2rem; border-bottom: 1px solid #20242c;
+        }
+        .stage-item:last-child { border-bottom: 0; }
+        .stage-marker {
+            width: 20px; height: 20px; flex: 0 0 20px; display: grid;
+            place-items: center; border: 1px solid #3a414e; border-radius: 50%;
+            color: #7f8998; font-size: .68rem; margin-top: .05rem;
+        }
+        .stage-marker.active { border-color: var(--accent); color: #11150d; background: var(--accent); }
+        .stage-marker.complete { border-color: #668d3b; color: var(--accent); }
+        .stage-label { color: #aeb6c4; font-size: .9rem; }
+        .stage-label.active { color: var(--text); font-weight: 600; }
+        .finding {
+            background: var(--surface); border: 1px solid var(--border);
+            border-radius: 12px; padding: 1.2rem; margin: .75rem 0;
+        }
+        .finding-claim { color: var(--text); font-weight: 650; line-height: 1.55; }
+        .citation {
+            display: inline-block; border: 1px solid #343b48; border-radius: 6px;
+            padding: .18rem .48rem; margin: .35rem .3rem 0 0;
+            color: var(--accent); font-size: .78rem; text-decoration: none;
+        }
+        .citation:hover { border-color: var(--accent); }
+        .empty-state {
+            background: #11141a; border: 1px dashed #343b48; border-radius: 12px;
+            padding: 1.4rem; color: #aeb6c4;
+        }
+        hr { border-color: var(--border); }
+        @media (max-width: 760px) {
+            [data-testid="stMain"] .block-container { padding: 1.5rem 1rem 3rem; }
+            [data-testid="stSidebar"] { min-width: 225px; }
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
 
-    /* Premium Header */
-    .nav-container {{
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        padding: 1rem 5%;
-        background: rgba(250, 249, 246, 0.8);
-        backdrop-filter: blur(8px);
-        border-bottom: 1px solid #e5e7eb;
-        position: fixed;
-        top: 0;
-        left: 0;
-        right: 0;
-        z-index: 999;
-    }}
-    .logo-text {{
-        font-weight: 700;
-        font-size: 1.5rem;
-        letter-spacing: -0.02em;
-        color: {TEXT_COLOR};
-        display: flex;
-        align-items: center;
-        gap: 8px;
-    }}
-    .logo-icon {{
-        color: {ACCENT_COLOR};
-    }}
-    .nav-links {{
-        display: flex;
-        gap: 2rem;
-    }}
-    .nav-link {{
-        text-decoration: none;
-        color: #6b7280;
-        font-weight: 500;
-        font-size: 0.95rem;
-        transition: color 0.2s;
-        cursor: pointer;
-    }}
-    .nav-link:hover, .nav-link.active {{
-        color: {TEXT_COLOR};
-    }}
 
-    /* Hero Section */
-    .hero-container {{
-        text-align: center;
-        padding: 8rem 2rem 4rem 2rem;
-        max-width: 800px;
-        margin: 0 auto;
-    }}
-    .hero-title {{
-        font-size: 4rem;
-        font-weight: 800;
-        line-height: 1.1;
-        letter-spacing: -0.04em;
-        margin-bottom: 1.5rem;
-        color: {TEXT_COLOR};
-    }}
-    .hero-title span {{
-        color: {ACCENT_COLOR};
-    }}
-    .hero-subtitle {{
-        font-size: 1.25rem;
-        color: #4b5563;
-        line-height: 1.6;
-        margin-bottom: 3rem;
-    }}
+def api_request(method: str, path: str, **kwargs: Any) -> tuple[Optional[Any], Optional[str]]:
+    try:
+        response = requests.request(
+            method,
+            f"{BACKEND_URL}{path}",
+            timeout=REQUEST_TIMEOUT_SECONDS,
+            **kwargs,
+        )
+    except requests.ConnectionError:
+        return None, f"Could not connect to Nexus API at {BACKEND_URL}."
+    except requests.Timeout:
+        return None, "The Nexus API did not respond in time. Please try again."
+    except requests.RequestException:
+        return None, "The request to the Nexus API could not be completed."
 
-    /* Research Input Area */
-    .search-outer {{
-        max-width: 700px;
-        margin: 0 auto;
-        background: #ffffff;
-        border: 1px solid #e5e7eb;
-        border-radius: 16px;
-        box-shadow: 0 4px 20px rgba(0,0,0,0.03);
-        padding: 1rem;
-        transition: border-color 0.3s, box-shadow 0.3s;
-    }}
-    .search-outer:focus-within {{
-        border-color: {ACCENT_COLOR};
-        box-shadow: 0 4px 25px rgba(255, 87, 51, 0.08);
-    }}
-
-    /* Override Streamlit text area */
-    .stTextArea textarea {{
-        background: transparent !important;
-        border: none !important;
-        font-size: 1.1rem !important;
-        color: {TEXT_COLOR} !important;
-        padding: 0.5rem !important;
-        box-shadow: none !important;
-    }}
-
-    /* Example Prompts */
-    .example-container {{
-        display: flex;
-        justify-content: center;
-        gap: 0.75rem;
-        margin-top: 2rem;
-        flex-wrap: wrap;
-    }}
-    .example-tag {{
-        background: #ffffff;
-        border: 1px solid #e5e7eb;
-        padding: 0.4rem 1rem;
-        border-radius: 100px;
-        font-size: 0.85rem;
-        color: #6b7280;
-        cursor: pointer;
-        transition: all 0.2s;
-    }}
-    .example-tag:hover {{
-        border-color: {ACCENT_COLOR};
-        color: {ACCENT_COLOR};
-    }}
-
-    /* Live Activity Timeline */
-    .timeline-container {{
-        max-width: 900px;
-        margin: 6rem auto;
-        background: #ffffff;
-        border-radius: 20px;
-        border: 1px solid #e5e7eb;
-        padding: 2rem;
-        box-shadow: 0 10px 30px rgba(0,0,0,0.02);
-    }}
-    .timeline-header {{
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        margin-bottom: 2rem;
-        padding-bottom: 1rem;
-        border-bottom: 1px solid #f3f4f6;
-    }}
-    .stage-row {{
-        display: flex;
-        align-items: center;
-        gap: 1.5rem;
-        padding: 1rem 0;
-        position: relative;
-    }}
-    .stage-icon {{
-        width: 32px;
-        height: 32px;
-        border-radius: 50%;
-        background: #f3f4f6;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        font-size: 1rem;
-        z-index: 2;
-    }}
-    .stage-row.active .stage-icon {{
-        background: {ACCENT_COLOR};
-        color: white;
-        box-shadow: 0 0 15px rgba(255, 87, 51, 0.4);
-        animation: pulse 2s infinite;
-    }}
-    .stage-row.completed .stage-icon {{
-        background: #10b981;
-        color: white;
-    }}
-    .stage-content {{
-        flex: 1;
-    }}
-    .stage-title {{
-        font-weight: 600;
-        font-size: 1rem;
-        color: #374151;
-    }}
-    .stage-row.active .stage-title {{
-        color: {TEXT_COLOR};
-    }}
-    .stage-time {{
-        font-size: 0.8rem;
-        color: #9ca3af;
-        font-family: 'JetBrains Mono', monospace;
-    }}
-
-    @keyframes pulse {{
-        0% {{ transform: scale(1); }}
-        50% {{ transform: scale(1.1); }}
-        100% {{ transform: scale(1); }}
-    }}
-
-    /* Report Layout */
-    .report-container {{
-        max-width: 1000px;
-        margin: 6rem auto;
-    }}
-    .report-header {{
-        margin-bottom: 4rem;
-    }}
-    .report-card {{
-        background: white;
-        border-radius: 24px;
-        border: 1px solid #e5e7eb;
-        padding: 3rem;
-        box-shadow: 0 20px 50px rgba(0,0,0,0.02);
-    }}
-    .section-title {{
-        font-size: 1.5rem;
-        font-weight: 700;
-        margin-bottom: 1.5rem;
-        display: flex;
-        align-items: center;
-        gap: 10px;
-    }}
-    .finding-card {{
-        border-left: 4px solid {ACCENT_COLOR};
-        padding: 1.5rem;
-        background: #fffcfb;
-        margin-bottom: 1.5rem;
-        border-radius: 0 12px 12px 0;
-    }}
-    .source-grid {{
-        display: grid;
-        grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
-        gap: 1.5rem;
-        margin-top: 2rem;
-    }}
-    .source-card {{
-        background: white;
-        border: 1px solid #e5e7eb;
-        padding: 1.5rem;
-        border-radius: 16px;
-        transition: transform 0.2s, border-color 0.2s;
-    }}
-    .source-card:hover {{
-        transform: translateY(-4px);
-        border-color: {ACCENT_COLOR};
-    }}
-    .tier-badge {{
-        font-size: 0.7rem;
-        text-transform: uppercase;
-        font-weight: 700;
-        padding: 2px 8px;
-        border-radius: 4px;
-        background: #f3f4f6;
-        color: #4b5563;
-    }}
-
-    /* History Cards */
-    .history-card {{
-        background: white;
-        border: 1px solid #e5e7eb;
-        padding: 1.5rem;
-        border-radius: 16px;
-        margin-bottom: 1rem;
-        cursor: pointer;
-        transition: all 0.2s;
-    }}
-    .history-card:hover {{
-        border-color: {ACCENT_COLOR};
-        background: #fffcfb;
-    }}
-</style>
-""", unsafe_allow_html=True)
-
-# --- SESSION STATE ---
-if "page" not in st.session_state:
-    st.session_state.page = "Workspace"
-if "active_job_id" not in st.session_state:
-    st.session_state.active_job_id = None
-if "research_query" not in st.session_state:
-    st.session_state.research_query = ""
-
-# --- COMPONENTS ---
-
-def render_header():
-    # We use a single column with custom HTML for the top nav
-    st.markdown(f"""
-    <div class="nav-container">
-        <div class="logo-text">
-            <span class="logo-icon">⚡</span> Nexus AI
-        </div>
-        <div class="nav-links">
-            <span class="nav-link {'active' if st.session_state.page == 'Workspace' else ''}" onclick="window.parent.postMessage({{type: 'streamlit:set_component_value', value: 'Workspace'}}, '*')">Workspace</span>
-            <span class="nav-link {'active' if st.session_state.page == 'History' else ''}" onclick="window.parent.postMessage({{type: 'streamlit:set_component_value', value: 'History'}}, '*')">History</span>
-            <span class="nav-link">About</span>
-            <div style="display: flex; align-items: center; gap: 6px; font-size: 0.85rem; color: #10b981; font-weight: 600;">
-                <div style="width: 8px; height: 8px; background: #10b981; border-radius: 50%;"></div> Systems Operational
-            </div>
-        </div>
-    </div>
-    """, unsafe_allow_html=True)
-
-    # Hidden selectbox to handle the navigation events
-    # Note: Streamlit doesn't easily allow cross-component communication for navigation in this way,
-    # so we'll use standard Streamlit radio in the sidebar for actual switching,
-    # but the header for visual polish.
-    pass
-
-def submit_research(q):
-    if not q:
-        st.warning("Please enter a research question.")
-        return
+    if not response.ok:
+        if response.status_code == 404:
+            return None, "This job is not available yet. Refresh in a moment, or return to the dashboard."
+        return None, f"The Nexus API returned HTTP {response.status_code}. Please try again."
 
     try:
-        res = requests.post(f"{BACKEND_URL}/research", json={"question": q})
-        if res.status_code == 200:
-            st.session_state.active_job_id = res.json()["job_id"]
-            st.session_state.page = "Active Research"
+        return response.json(), None
+    except ValueError:
+        return None, "The Nexus API returned an unreadable response."
+
+
+def get_jobs() -> tuple[list[dict[str, Any]], Optional[str]]:
+    data, error = api_request("GET", "/jobs")
+    if error:
+        return [], error
+    if not isinstance(data, list):
+        return [], "The Nexus API returned an unexpected job list."
+    return [job for job in data if isinstance(job, dict)], None
+
+
+def format_timestamp(value: Any) -> str:
+    if not isinstance(value, str) or not value:
+        return "Not available"
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        return parsed.astimezone().strftime("%b %d, %Y · %I:%M %p")
+    except ValueError:
+        return value
+
+
+def status_class(status: Any) -> str:
+    if status == "completed":
+        return "ok"
+    if status == "failed":
+        return "bad"
+    if status in ("queued", "running"):
+        return "warn"
+    return ""
+
+
+def status_pill(status: Any) -> str:
+    label = escape(str(status or "unknown").replace("_", " ").title())
+    css_class = status_class(status)
+    return (
+        f'<span class="status-pill"><span class="status-dot {css_class}"></span>'
+        f"{label}</span>"
+    )
+
+
+def section_heading(title: str, note: Optional[str] = None) -> None:
+    st.markdown('<div class="section-head">', unsafe_allow_html=True)
+    st.markdown(f"<h3>{title}</h3>", unsafe_allow_html=True)
+    if note:
+        st.caption(note)
+    st.markdown("</div>", unsafe_allow_html=True)
+
+
+def open_job(job: dict[str, Any]) -> None:
+    st.session_state.active_job_id = job.get("job_id")
+    st.session_state.page = "Report" if job.get("status") == "completed" else "Research Progress"
+    st.rerun()
+
+
+def render_sidebar() -> None:
+    with st.sidebar:
+        st.markdown(
+            '<div class="brand"><span class="brand-mark">N</span> Nexus AI</div>',
+            unsafe_allow_html=True,
+        )
+        st.caption("RESEARCH WORKSPACE")
+        if st.button("＋  New research", type="primary", use_container_width=True, key="new_research_nav"):
+            st.session_state.page = "New Research"
             st.rerun()
+        st.markdown("")
+        for item in NAV_ITEMS:
+            icon = {
+                "Dashboard": "⌂",
+                "New Research": "＋",
+                "Research History": "◷",
+                "Saved Reports": "▤",
+                "Settings": "⚙",
+            }[item]
+            if st.button(
+                f"{icon}  {item}",
+                type="primary" if st.session_state.page == item else "secondary",
+                use_container_width=True,
+                key=f"nav_{item}",
+            ):
+                st.session_state.page = item
+                st.rerun()
+        st.markdown("---")
+        health, error = api_request("GET", "/health")
+        if error:
+            st.markdown(
+                '<span class="status-pill"><span class="status-dot bad"></span>API unavailable</span>',
+                unsafe_allow_html=True,
+            )
         else:
-            st.error(f"Backend error: {res.text}")
-    except Exception as e:
-        st.error(f"Could not connect to backend: {e}")
+            st.markdown(
+                '<span class="status-pill"><span class="status-dot ok"></span>API connected</span>',
+                unsafe_allow_html=True,
+            )
+        st.caption("Service status reflects the backend health endpoint.")
 
-# --- PAGE: LANDING / WORKSPACE ---
-def show_workspace():
-    st.markdown(f"""
-    <div class="hero-container">
-        <div class="hero-title">Research anything. <span>Understand everything.</span></div>
-        <div class="hero-subtitle">Your autonomous AI research assistant. Searching, analysing and connecting insights from trusted sources across the web.</div>
-    </div>
-    """, unsafe_allow_html=True)
 
-    with st.container():
-        # Custom search box style
-        st.markdown('<div class="search-outer">', unsafe_allow_html=True)
-        q = st.text_area("", placeholder="What would you like to research today?", value=st.session_state.research_query, height=100, key="main_search")
-
-        col_btn, col_spacer = st.columns([1, 4])
-        with col_btn:
-            if st.button("Research", type="primary", use_container_width=True):
-                submit_research(q)
-        st.markdown('</div>', unsafe_allow_html=True)
-
-    st.markdown('<div class="example-container">', unsafe_allow_html=True)
-    examples = [
-        "Latest AI research and developments",
-        "Compare RAG vs fine-tuning",
-        "How Kubernetes works internally",
-        "Cloudflare MCP architecture",
-        "Latest developments in cybersecurity"
-    ]
-
-    # We use actual buttons for functionality, but style them like tags
-    cols = st.columns(len(examples))
-    for i, ex in enumerate(examples):
-        if cols[i].button(ex, key=f"ex_{i}"):
-            st.session_state.research_query = ex
-            st.rerun()
-    st.markdown('</div>', unsafe_allow_html=True)
-
-# --- PAGE: ACTIVE RESEARCH ---
-def show_active_research():
-    job_id = st.session_state.active_job_id
-    if not job_id:
-        st.session_state.page = "Workspace"
+def render_dashboard() -> None:
+    st.markdown(
+        """
+        <div class="hero-panel">
+            <div class="eyebrow">Nexus AI · Research workspace</div>
+            <h1>Research with evidence.</h1>
+            <div class="hero-copy">Turn a question into a structured report grounded in web sources.
+            Review what is running, revisit completed research, and follow each job's actual progress.</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+    if st.button("＋  Start new research", type="primary", key="dashboard_new"):
+        st.session_state.page = "New Research"
         st.rerun()
 
-    # Poll for status
-    try:
-        response = requests.get(f"{BACKEND_URL}/job/{job_id}")
-        if response.status_code != 200:
-            st.error("Failed to fetch job status.")
+    jobs, error = get_jobs()
+    if error:
+        st.error(error)
+        st.info("The dashboard needs the FastAPI backend to load research activity.")
+        return
+
+    completed = [job for job in jobs if job.get("status") == "completed"]
+    running = [job for job in jobs if job.get("status") in ("queued", "running")]
+    failed = [job for job in jobs if job.get("status") == "failed"]
+    metrics = st.columns(4)
+    metrics[0].metric("Total research", len(jobs))
+    metrics[1].metric("Completed", len(completed))
+    metrics[2].metric("In progress", len(running))
+    metrics[3].metric("Failed", len(failed))
+
+    left, right = st.columns([1.2, 1])
+    with left:
+        section_heading("Recent activity", "Latest jobs returned by the research API")
+        if not jobs:
+            st.markdown(
+                '<div class="empty-state">No research yet. Start with a question to create your first report.</div>',
+                unsafe_allow_html=True,
+            )
+        for job in jobs[:5]:
+            st.markdown(status_pill(job.get("status")), unsafe_allow_html=True)
+            question = job.get("question") or "Untitled research"
+            st.markdown(f"**{question}**")
+            st.caption(
+                f"Updated {format_timestamp(job.get('updated_at'))} · "
+                f"Stage: {job.get('current_stage') or 'Unknown'}"
+            )
+            if st.button("Open job", key=f"recent_{job.get('job_id')}"):
+                open_job(job)
+    with right:
+        section_heading("Latest reports", "Completed research")
+        if not completed:
+            st.markdown(
+                '<div class="empty-state">Completed reports will appear here.</div>',
+                unsafe_allow_html=True,
+            )
+        for job in completed[:4]:
+            st.markdown(f"**{job.get('question') or 'Untitled research'}**")
+            result = job.get("result") or {}
+            confidence = result.get("confidence_level")
+            st.caption(
+                f"Updated {format_timestamp(job.get('updated_at'))}"
+                + (f" · {str(confidence).title()} confidence" if confidence else "")
+            )
+            if st.button("View report", key=f"report_{job.get('job_id')}"):
+                open_job(job)
+
+
+def render_new_research() -> None:
+    st.markdown('<div class="eyebrow">New research</div>', unsafe_allow_html=True)
+    st.title("What do you want to understand?")
+    st.markdown(
+        '<p class="hero-copy">A focused question helps Nexus find relevant sources and produce a clearer, evidence-backed response.</p>',
+        unsafe_allow_html=True,
+    )
+    st.markdown('<div class="surface-card">', unsafe_allow_html=True)
+    with st.form("research_request_form", clear_on_submit=False):
+        question = st.text_area(
+            "Research topic",
+            placeholder="e.g. Compare the trade-offs of RAG and fine-tuning for enterprise AI systems",
+            height=150,
+            key="research_topic",
+        )
+        st.caption(
+            "The current API accepts a research question only. Context, source preferences, "
+            "and additional configuration are not supported."
+        )
+        submitted = st.form_submit_button("Start research", type="primary", use_container_width=True)
+    st.markdown("</div>", unsafe_allow_html=True)
+
+    if submitted:
+        topic = question.strip()
+        if not topic:
+            st.warning("Enter a research question to continue.")
             return
+        with st.spinner("Creating your research job…"):
+            payload, error = api_request("POST", "/research", json={"question": topic})
+        if error:
+            st.error(error)
+            return
+        job_id = payload.get("job_id") if isinstance(payload, dict) else None
+        if not job_id:
+            st.error("The API did not return a job ID. No research job was opened.")
+            return
+        st.session_state.active_job_id = job_id
+        st.session_state.page = "Research Progress"
+        st.session_state.auto_refresh = True
+        st.rerun()
 
-        job = response.json()
-        status = job["status"]
-        stage = job["current_stage"]
-        logs = job.get("logs", [])
 
-        st.markdown(f"""
-        <div class="timeline-container">
-            <div class="timeline-header">
-                <div>
-                    <div style="font-weight: 700; font-size: 1.25rem;">Research in progress</div>
-                    <div style="color: #6b7280; font-size: 0.9rem;">Job ID: {job_id}</div>
-                </div>
-                <div style="text-align: right;">
-                    <div style="font-weight: 600; color: {ACCENT_COLOR};">{stage.upper()}</div>
-                    <div style="font-size: 0.8rem; color: #9ca3af;">Elapsed: {job.get('elapsed_time', '...') if 'elapsed_time' in job else 'Scanning...'}</div>
-                </div>
-            </div>
-        """, unsafe_allow_html=True)
+def render_progress(job: dict[str, Any]) -> None:
+    status = job.get("status", "unknown")
+    stage = job.get("current_stage", "unknown")
+    if status == "failed":
+        st.error(job.get("error") or "The research job failed. The backend did not provide an error detail.")
+    elif status in ("queued", "running"):
+        st.info("Research is in progress. This view uses the job status and stage reported by the backend.")
 
-        stages = [
-            ("created", "Understanding the question", "🎯"),
-            ("planning", "Creating research plan", "📋"),
-            ("searching", "Searching the web", "🔍"),
-            ("retrieving", "Retrieving webpages", "🌐"),
-            ("synthesizing", "Analysing findings with Gemini", "🧠"),
-            ("done", "Generating the final report", "📝")
-        ]
+    st.markdown('<div class="surface-card">', unsafe_allow_html=True)
+    cols = st.columns([1, 1, 2])
+    cols[0].markdown("**Status**")
+    cols[0].markdown(status_pill(status), unsafe_allow_html=True)
+    cols[1].markdown("**Current stage**")
+    cols[1].write(str(stage).replace("_", " ").title())
+    cols[2].markdown("**Job ID**")
+    cols[2].code(str(job.get("job_id", "")), language=None)
+    st.markdown("</div>", unsafe_allow_html=True)
 
-        current_stage_idx = -1
-        for i, (sid, name, icon) in enumerate(stages):
-            if stage == sid:
-                current_stage_idx = i
-                break
-        if stage == "done" or status == "completed":
-            current_stage_idx = 5
+    stage_ids = [item[0] for item in RESEARCH_STAGES]
+    current_index = stage_ids.index(stage) if stage in stage_ids else -1
+    section_heading("Research lifecycle", "Only stages reported by the existing agent are shown")
+    st.markdown('<div class="surface-card">', unsafe_allow_html=True)
+    for index, (stage_id, label) in enumerate(RESEARCH_STAGES):
+        is_complete = status == "completed" or (current_index >= 0 and index < current_index)
+        is_active = status in ("queued", "running") and stage_id == stage
+        marker_class = "complete" if is_complete else "active" if is_active else ""
+        marker = "✓" if is_complete else "•" if is_active else str(index + 1)
+        label_class = "active" if is_active else ""
+        st.markdown(
+            f'<div class="stage-item"><span class="stage-marker {marker_class}">{marker}</span>'
+            f'<span class="stage-label {label_class}">{escape(label)}</span></div>',
+            unsafe_allow_html=True,
+        )
+    if current_index < 0 and status not in ("failed", "completed"):
+        st.caption(f"Current backend stage: {stage}")
+    st.markdown("</div>", unsafe_allow_html=True)
 
-        for i, (sid, name, icon) in enumerate(stages):
-            is_active = i == current_stage_idx and status != "completed"
-            is_completed = i < current_stage_idx or status == "completed"
+    logs = job.get("logs") or []
+    if logs:
+        with st.expander(f"Job activity ({len(logs)} log entries)"):
+            for entry in logs:
+                st.text(str(entry))
 
-            row_class = "stage-row"
-            if is_active: row_class += " active"
-            if is_completed: row_class += " completed"
-
-            st.markdown(f"""
-            <div class="{row_class}">
-                <div class="stage-icon">{icon if not is_completed else '✓'}</div>
-                <div class="stage-content">
-                    <div class="stage-title">{name}</div>
-                </div>
-            </div>
-            """, unsafe_allow_html=True)
-
-        st.markdown('</div>', unsafe_allow_html=True)
-
-        # Show Metrics
-        metrics = st.columns(4)
-        # We derive some metrics from logs if not explicit
-        urls_found = len([l for l in logs if "Found" in l and "search results" in l])
-        sources_valid = len([l for l in logs if "unique valid sources" in l])
-
-        metrics[0].metric("Search Queries", "1") # Simplified
-        metrics[1].metric("URLs Found", urls_found)
-        metrics[2].metric("Sources Validated", sources_valid)
-        metrics[3].metric("Current Stage", stage.capitalize())
-
-        if status == "completed":
+    if status == "completed":
+        st.success("Research completed.")
+        if st.button("Open research report", type="primary"):
             st.session_state.page = "Report"
             st.rerun()
-        elif status == "failed":
-            st.error(f"Research failed: {job.get('error')}")
-            if st.button("Back to Workspace"):
-                st.session_state.page = "Workspace"
+    elif status == "failed":
+        if st.button("Retry job", type="primary"):
+            payload, error = api_request("POST", f"/job/{job.get('job_id')}/resume")
+            if error:
+                st.error(error)
+            elif isinstance(payload, dict) and payload.get("status") == "already_completed":
+                st.session_state.page = "Report"
                 st.rerun()
-        else:
-            time.sleep(2)
-            st.rerun()
-
-    except Exception as e:
-        st.error(f"Error polling job: {e}")
-
-# --- PAGE: REPORT ---
-def show_report():
-    job_id = st.session_state.active_job_id
-    try:
-        response = requests.get(f"{BACKEND_URL}/job/{job_id}")
-        job = response.json()
-        res = job.get("result")
-
-        if not res:
-            st.warning("No report results found.")
-            if st.button("New Research"):
-                st.session_state.page = "Workspace"
-                st.rerun()
-            return
-
-        st.markdown(f"""
-        <div class="report-container">
-            <div class="report-header">
-                <div style="font-size: 0.9rem; color: {ACCENT_COLOR}; font-weight: 700; text-transform: uppercase; margin-bottom: 0.5rem;">Research Report</div>
-                <div style="font-size: 2.5rem; font-weight: 800; letter-spacing: -0.03em; margin-bottom: 1rem;">{res['question']}</div>
-                <div style="display: flex; gap: 2rem; color: #6b7280; font-size: 0.9rem;">
-                    <span>Completed: {job['updated_at']}</span>
-                    <span>Confidence: <b style="color: {TEXT_COLOR}">{res['confidence_level'].upper()}</b></span>
-                    <span>Sources: <b style="color: {TEXT_COLOR}">{len(res.get('source_urls', []))}</b></span>
-                </div>
-            </div>
-
-            <div class="report-card">
-                <div class="section-title">✨ Executive Summary</div>
-                <div style="font-size: 1.15rem; line-height: 1.7; color: #374151; margin-bottom: 3rem;">
-                    {res['short_answer']}
-                </div>
-
-                <div class="section-title">🎯 Key Findings</div>
-        """, unsafe_allow_html=True)
-
-        for f in res.get('findings', []):
-            st.markdown(f"""
-            <div class="finding-card">
-                <div style="font-weight: 700; font-size: 1.1rem; margin-bottom: 0.75rem;">{f['claim']}</div>
-                <div style="font-size: 0.95rem; line-height: 1.6; color: #4b5563;">
-                    {f['evidence_passages'][0] if f['evidence_passages'] else ''}
-                </div>
-                <div style="margin-top: 1rem; display: flex; gap: 8px;">
-                    {'<span class="tier-badge" style="background: #fff1f0; color: #ff4d4f;">Interpretation</span>' if f.get('is_interpreted') else '<span class="tier-badge" style="background: #f6ffed; color: #52c41a;">Direct Evidence</span>'}
-                </div>
-            </div>
-            """, unsafe_allow_html=True)
-
-        st.markdown('<div class="section-title">🔍 Verified Sources</div>', unsafe_allow_html=True)
-        st.markdown('<div class="source-grid">', unsafe_allow_html=True)
-
-        # We need the full source objects from the job store if available,
-        # otherwise we just show the URLs from the result.
-        # The backend store actually keeps the full Source list.
-        for s_url in res.get('source_urls', []):
-            domain = s_url.split("//")[-1].split("/")[0]
-            st.markdown(f"""
-            <div class="source-card">
-                <div class="tier-badge">TIER 1</div>
-                <div style="font-weight: 600; margin: 0.5rem 0; font-size: 0.95rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">{domain}</div>
-                <div style="font-size: 0.8rem; color: #6b7280; margin-bottom: 1rem;">Verified technical documentation</div>
-                <a href="{s_url}" target="_blank" style="color: {ACCENT_COLOR}; text-decoration: none; font-size: 0.85rem; font-weight: 600;">Visit Source →</a>
-            </div>
-            """, unsafe_allow_html=True)
-
-        st.markdown('</div></div></div>', unsafe_allow_html=True)
-
-        # Sidebar-like actions at the bottom
-        st.markdown("---")
-        c1, c2, c3, c4 = st.columns(4)
-        if c1.button("New Research", use_container_width=True):
-            st.session_state.page = "Workspace"
-            st.session_state.research_query = ""
-            st.rerun()
-        if c2.button("Download Markdown", use_container_width=True):
-            st.info("Downloading...")
-        if c3.button("Research History", use_container_width=True):
-            st.session_state.page = "History"
-            st.rerun()
-
-    except Exception as e:
-        st.error(f"Error loading report: {e}")
-
-# --- PAGE: HISTORY ---
-def show_history():
-    st.markdown('<div style="margin-top: 6rem;"></div>', unsafe_allow_html=True)
-    st.title("Research History")
-
-    try:
-        response = requests.get(f"{BACKEND_URL}/jobs")
-        if response.status_code == 200:
-            jobs = response.json()
-            if not jobs:
-                st.info("No research history found.")
             else:
-                for job in jobs:
-                    with st.container():
-                        st.markdown(f"""
-                        <div class="history-card">
-                            <div style="display: flex; justify-content: space-between; align-items: flex-start;">
-                                <div style="font-weight: 700; font-size: 1.1rem; margin-bottom: 0.5rem;">{job['question']}</div>
-                                <div class="tier-badge">{job['status']}</div>
-                            </div>
-                            <div style="display: flex; gap: 1.5rem; color: #6b7280; font-size: 0.85rem;">
-                                <span>{job['updated_at']}</span>
-                                <span>Confidence: <b>{job.get('result', {}).get('confidence_level', 'N/A').upper()}</b></span>
-                            </div>
-                        </div>
-                        """, unsafe_allow_html=True)
-                        if st.button("View Report", key=f"view_{job['job_id']}"):
-                            st.session_state.active_job_id = job['job_id']
-                            st.session_state.page = "Report"
-                            st.rerun()
-        else:
-            st.error("Failed to load history.")
-    except Exception as e:
-        st.error(f"Error: {e}")
+                st.session_state.auto_refresh = True
+                st.rerun()
+    else:
+        cols = st.columns([1, 1, 3])
+        cols[0].button("Refresh status", key="refresh_job")
+        auto_refresh = cols[1].checkbox(
+            "Auto-refresh",
+            value=st.session_state.get("auto_refresh", True),
+            key="auto_refresh",
+        )
+        if auto_refresh:
+            time.sleep(POLL_INTERVAL_SECONDS)
+            st.rerun()
 
-# --- ROUTER ---
-st.sidebar.markdown("### Navigation")
-nav = st.sidebar.radio("", ["Workspace", "History"])
-if nav != st.session_state.page and st.session_state.page not in ["Active Research", "Report"]:
-    st.session_state.page = nav
 
-# For the active/report pages, we keep them until user clicks "New Research"
-if st.session_state.page == "Workspace":
-    show_workspace()
-elif st.session_state.page == "Active Research":
-    show_active_research()
-elif st.session_state.page == "Report":
-    show_report()
-elif st.session_state.page == "History":
-    show_history()
+def render_research_progress() -> None:
+    st.markdown('<div class="eyebrow">Research job</div>', unsafe_allow_html=True)
+    st.title("Research progress")
+    job_id = st.session_state.get("active_job_id")
+    if not job_id:
+        st.warning("Choose a research job from history, or start a new one.")
+        if st.button("Go to dashboard"):
+            st.session_state.page = "Dashboard"
+            st.rerun()
+        return
 
-# Header rendered last so it overlays
-render_header()
+    job, error = api_request("GET", f"/job/{job_id}")
+    if error:
+        st.error(error)
+        if st.button("Try again"):
+            st.rerun()
+        return
+    if not isinstance(job, dict):
+        st.error("The API returned an unexpected job response.")
+        return
+    st.markdown(f"**{job.get('question') or 'Research job'}**")
+    render_progress(job)
+
+
+def build_report_markdown(result: dict[str, Any], job: dict[str, Any]) -> str:
+    lines = [
+        f"# {result.get('question') or 'Research report'}",
+        "",
+        f"Status: {job.get('status', 'unknown')}",
+        f"Updated: {format_timestamp(job.get('updated_at'))}",
+        f"Confidence: {result.get('confidence_level', 'not provided')}",
+        "",
+        "## Executive summary",
+        "",
+        result.get("short_answer") or "No summary was provided.",
+        "",
+        "## Findings",
+        "",
+    ]
+    for index, finding in enumerate(result.get("findings") or [], start=1):
+        lines.extend([f"### {index}. {finding.get('claim', 'Finding')}", ""])
+        for passage in finding.get("evidence_passages") or []:
+            lines.extend([f"> {passage}", ""])
+        urls = finding.get("supporting_urls") or []
+        if urls:
+            lines.extend(["Supporting sources: " + ", ".join(str(url) for url in urls), ""])
+    lines.extend(["## Sources", ""])
+    lines.extend(f"- {url}" for url in result.get("source_urls") or [])
+    for section in ("assumptions", "limitations", "unanswered_questions"):
+        values = result.get(section) or []
+        if values:
+            lines.extend(["", f"## {section.replace('_', ' ').title()}", ""])
+            lines.extend(f"- {item}" for item in values)
+    return "\n".join(lines).strip() + "\n"
+
+
+def render_report(job: dict[str, Any]) -> None:
+    result = job.get("result")
+    if not isinstance(result, dict):
+        st.warning("This job does not have a report available yet.")
+        if job.get("error"):
+            st.error(job["error"])
+        if st.button("View job progress"):
+            st.session_state.page = "Research Progress"
+            st.rerun()
+        return
+
+    st.markdown('<div class="eyebrow">Research report</div>', unsafe_allow_html=True)
+    st.title(result.get("question") or "Research report")
+    confidence = result.get("confidence_level")
+    st.markdown(
+        f"{status_pill(job.get('status'))} &nbsp; "
+        f'<span class="subtle">Updated {format_timestamp(job.get("updated_at"))}</span>',
+        unsafe_allow_html=True,
+    )
+    if confidence:
+        st.caption(f"Confidence: {str(confidence).replace('_', ' ').title()}")
+
+    st.markdown("---")
+    section_heading("Executive summary")
+    summary = result.get("short_answer")
+    if summary:
+        st.markdown(summary)
+    else:
+        st.info("The backend did not return an executive summary.")
+
+    breakdown = result.get("confidence_breakdown")
+    if isinstance(breakdown, dict):
+        section_heading("Confidence breakdown", "Heuristic values returned by the research agent")
+        cols = st.columns(len(breakdown) or 1)
+        for column, (key, value) in zip(cols, breakdown.items()):
+            column.metric(key.replace("_", " ").title(), f"{value:.0%}" if isinstance(value, (float, int)) else str(value))
+
+    findings = result.get("findings") or []
+    section_heading("Findings", f"{len(findings)} finding(s) returned by the agent")
+    if not findings:
+        st.markdown(
+            '<div class="empty-state">No structured findings were returned for this research.</div>',
+            unsafe_allow_html=True,
+        )
+    for index, finding in enumerate(findings, start=1):
+        st.markdown('<div class="finding">', unsafe_allow_html=True)
+        st.markdown(f"**{index}. {finding.get('claim') or 'Finding'}**")
+        st.caption("Interpretation" if finding.get("is_interpreted") else "Directly supported")
+        for passage in finding.get("evidence_passages") or []:
+            st.markdown(f"> {passage}")
+        urls = finding.get("supporting_urls") or []
+        if urls:
+            st.caption("Supporting sources")
+            for source_index, url in enumerate(urls, start=1):
+                st.link_button(
+                    f"Source {source_index}",
+                    str(url),
+                    key=f"finding_{index}_source_{source_index}",
+                )
+        st.markdown("</div>", unsafe_allow_html=True)
+
+    source_urls = result.get("source_urls") or []
+    section_heading("Source references", f"{len(source_urls)} URL(s) supplied in the report")
+    if source_urls:
+        for index, url in enumerate(source_urls, start=1):
+            st.link_button(
+                f"{index}. {url}",
+                str(url),
+                use_container_width=True,
+                key=f"report_source_{index}",
+            )
+    else:
+        st.info("No source URLs were returned.")
+
+    for label, key in (
+        ("Assumptions", "assumptions"),
+        ("Limitations", "limitations"),
+        ("Unanswered questions", "unanswered_questions"),
+    ):
+        values = result.get(key) or []
+        if values:
+            section_heading(label)
+            for value in values:
+                st.markdown(f"- {value}")
+
+    markdown = build_report_markdown(result, job)
+    filename = f"nexus-research-{job.get('job_id', 'report')}.md"
+    col_copy, col_download = st.columns([1, 1])
+    with col_copy:
+        st.code(markdown, language="markdown")
+    with col_download:
+        st.download_button(
+            "Download Markdown report",
+            data=markdown,
+            file_name=filename,
+            mime="text/markdown",
+            use_container_width=True,
+        )
+
+
+def render_report_page() -> None:
+    st.markdown('<div class="eyebrow">Library</div>', unsafe_allow_html=True)
+    job_id = st.session_state.get("active_job_id")
+    if not job_id:
+        st.title("Research report")
+        st.info("Select a completed report from history.")
+        return
+    job, error = api_request("GET", f"/job/{job_id}")
+    if error:
+        st.title("Research report")
+        st.error(error)
+        if st.button("Try again"):
+            st.rerun()
+        return
+    if isinstance(job, dict):
+        render_report(job)
+    else:
+        st.error("The API returned an unexpected job response.")
+
+
+def render_job_table(jobs: list[dict[str, Any]], key_prefix: str) -> None:
+    if not jobs:
+        st.markdown(
+            '<div class="empty-state">No matching research jobs were found.</div>',
+            unsafe_allow_html=True,
+        )
+        return
+    for job in jobs:
+        job_id = job.get("job_id", "")
+        st.markdown('<div class="surface-card">', unsafe_allow_html=True)
+        cols = st.columns([5, 1.4, 1.5])
+        cols[0].markdown(f"**{job.get('question') or 'Untitled research'}**")
+        cols[0].caption(f"Job ID · `{job_id}`")
+        cols[0].caption(
+            f"Last updated {format_timestamp(job.get('updated_at'))} · "
+            f"Stage: {job.get('current_stage') or 'Unknown'}"
+        )
+        cols[1].markdown(status_pill(job.get("status")), unsafe_allow_html=True)
+        if job.get("result") and isinstance(job["result"], dict):
+            confidence = job["result"].get("confidence_level")
+            if confidence:
+                cols[1].caption(f"{str(confidence).title()} confidence")
+        if cols[2].button("Open", key=f"{key_prefix}_{job_id}"):
+            open_job(job)
+        st.markdown("</div>", unsafe_allow_html=True)
+
+
+def render_history() -> None:
+    st.markdown('<div class="eyebrow">Library</div>', unsafe_allow_html=True)
+    st.title("Research history")
+    st.caption("Search by topic or job ID and filter using the status returned by the API.")
+    jobs, error = get_jobs()
+    if error:
+        st.error(error)
+        return
+    search_col, status_col = st.columns([2, 1])
+    query = search_col.text_input("Search research", placeholder="Topic or job ID")
+    statuses = ["All statuses"] + sorted({str(job.get("status", "unknown")) for job in jobs})
+    selected_status = status_col.selectbox("Status", statuses)
+    filtered = jobs
+    if query:
+        needle = query.casefold()
+        filtered = [
+            job for job in filtered
+            if needle in str(job.get("question", "")).casefold()
+            or needle in str(job.get("job_id", "")).casefold()
+        ]
+    if selected_status != "All statuses":
+        filtered = [job for job in filtered if job.get("status") == selected_status]
+    section_heading("All research", f"{len(filtered)} job(s)")
+    render_job_table(filtered, "history")
+
+
+def render_saved_reports() -> None:
+    st.markdown('<div class="eyebrow">Library</div>', unsafe_allow_html=True)
+    st.title("Saved reports")
+    st.caption("Completed reports available from the persisted job history.")
+    jobs, error = get_jobs()
+    if error:
+        st.error(error)
+        return
+    reports = [
+        job for job in jobs
+        if job.get("status") == "completed" and isinstance(job.get("result"), dict)
+    ]
+    render_job_table(reports, "saved")
+
+
+def render_settings() -> None:
+    st.markdown('<div class="eyebrow">Workspace</div>', unsafe_allow_html=True)
+    st.title("Settings")
+    st.caption("Service information available through the existing Nexus API.")
+    health, error = api_request("GET", "/health")
+    st.markdown('<div class="surface-card">', unsafe_allow_html=True)
+    st.subheader("Backend service")
+    st.write(f"API endpoint: `{BACKEND_URL}`")
+    if error:
+        st.error(error)
+    elif isinstance(health, dict) and health.get("status") == "ok":
+        st.success("FastAPI health check: operational")
+    else:
+        st.warning("The health endpoint responded with an unrecognized status.")
+    st.markdown("</div>", unsafe_allow_html=True)
+    st.markdown('<div class="surface-card">', unsafe_allow_html=True)
+    st.subheader("Research integrations")
+    st.write(
+        "Gemini and Firecrawl are configured server-side. The current health endpoint "
+        "does not report their individual availability, quota, or credential status."
+    )
+    st.markdown("</div>", unsafe_allow_html=True)
+    st.caption("API keys and environment variables are not read or displayed in the frontend.")
+
+
+def main() -> None:
+    inject_styles()
+    if "page" not in st.session_state:
+        st.session_state.page = "Dashboard"
+    if "active_job_id" not in st.session_state:
+        st.session_state.active_job_id = None
+    render_sidebar()
+    page = st.session_state.page
+    if page == "Dashboard":
+        render_dashboard()
+    elif page == "New Research":
+        render_new_research()
+    elif page == "Research Progress":
+        render_research_progress()
+    elif page == "Report":
+        render_report_page()
+    elif page == "Research History":
+        render_history()
+    elif page == "Saved Reports":
+        render_saved_reports()
+    elif page == "Settings":
+        render_settings()
+    else:
+        st.session_state.page = "Dashboard"
+        st.rerun()
+
+
+main()

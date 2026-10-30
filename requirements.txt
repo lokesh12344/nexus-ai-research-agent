@@ -4,6 +4,7 @@ firecrawl-py
 pydantic>=2.0.0
 pydantic-settings
 fastapi
+streamlit
 uvicorn
 typer
 langfuse
